@@ -77,22 +77,28 @@ elif page == "Query Analysis":
     st.write("Cross-Market comparisons")
     
     if st.button("Crypto Price trend vs Nifty (^NSEI)"):
-        # Utilizing the exact table names derived from notebook's to_sql operations
-        sql = f"""
+        sql = """
         SELECT
             DATE(c.last_updated) AS date,
             c.id AS crypto_id,
             avg(c.current_price) AS crypto_price,
             s.close AS nifty_close_price
-        FROM {TOP3_TABLE} c
-        LEFT JOIN {STOCK_TABLE} s 
+        FROM top3_crypto c
+        LEFT JOIN nifty_data s 
             ON DATE(c.last_updated) = s.Date AND s.source = '^NSEI'
         GROUP BY DATE(c.last_updated), c.id, s.close
         """
-        df = pd.read_sql(sql, engine)
+        
+        # Adding error handling to bypass Streamlit Cloud's redaction
+        try:
+            df = pd.read_sql(sql, engine)
+            st.subheader("Query Result")
+            st.dataframe(df)
+        except Exception as e:
+            st.error("🚨 Database Query Failed!")
+            st.error(f"Exact Error: {e}")
+            st.write("Check your table and column names in TiDB based on the error above.")
 
-        st.subheader("Query Result")
-        st.dataframe(df)
 
 elif page == "Insights":
     st.title("Insights on Top 3 Cryptocurrencies")
