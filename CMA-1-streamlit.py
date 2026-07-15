@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from sqlalchemy import create_engine
+import textwrap
 
 # ==========================================
 # 1. SET PAGE CONFIG (Must be the very first Streamlit command)
@@ -18,10 +19,23 @@ st.write("Data Preview")
 def init_connection():
     return create_engine(
         "mysql+pymysql://iatXFmXH7cy5Eyv.root:ndGScqvE2B1dpP9p@gateway01.ap-southeast-1.prod.aws.tidbcloud.com:4000/market_analysis",
-        connect_args={"ssl": {"ssl": True}}
+        connect_args={"ssl": {"ssl": True}},
+        pool_pre_ping=True,  # Automatically checks and resets stale connections
+        pool_recycle=3600
     )
 
 engine = init_connection()
+
+# Helper function to execute queries safely and prevent transaction locking
+def safe_read_sql(sql, engine, params=None):
+    with engine.connect() as conn:
+        try:
+            # Execute within a localized transaction context
+            with conn.begin():
+                return pd.read_sql(sql, conn, params=params)
+        except Exception as e:
+            # The context manager automatically rolls back the transaction here
+            raise e
 
 # ==========================================
 # 3. SIDEBAR NAVIGATION
@@ -53,62 +67,72 @@ if page == "Data Exploration":
     if st.button("Calculate Market Averages"):
         col_btc, col_oil, col_sp500, col_nifty = st.columns(4)
         
-        # Bitcoin Avg
-        btc_avg = pd.read_sql(
-            """SELECT AVG(current_price) AS avg_bitcoin FROM api_data 
-               WHERE id = 'bitcoin' AND DATE(last_updated) BETWEEN %s AND %s""",
-            engine, params=(start_date, end_date)
-        ).iloc[0, 0]
-        col_btc.metric("Bitcoin Avg Price", f"₹{btc_avg:,.2f}" if pd.notnull(btc_avg) else "N/A")
+        try:
+            # Bitcoin Avg
+            btc_df = safe_read_sql(
+                """SELECT AVG(current_price) AS avg_bitcoin FROM api_data 
+                   WHERE id = 'bitcoin' AND DATE(last_updated) BETWEEN %s AND %s""",
+                engine, params=(start_date, end_date)
+            )
+            btc_avg = btc_df.iloc[0, 0] if not btc_df.empty else None
+            col_btc.metric("Bitcoin Avg Price", f"₹{btc_avg:,.2f}" if pd.notnull(btc_avg) else "N/A")
 
-        # Oil Avg
-        oil_avg = pd.read_sql(
-            """SELECT AVG(Price) AS avg_oil_price FROM oil_data 
-               WHERE DATE(Date) BETWEEN %s AND %s""",
-            engine, params=(start_date, end_date)
-        ).iloc[0, 0]
-        col_oil.metric("Crude Oil Avg", f"${oil_avg:,.2f}" if pd.notnull(oil_avg) else "N/A")
+            # Oil Avg
+            oil_df = safe_read_sql(
+                """SELECT AVG(Price) AS avg_oil_price FROM oil_data 
+                   WHERE DATE(Date) BETWEEN %s AND %s""",
+                engine, params=(start_date, end_date)
+            )
+            oil_avg = oil_df.iloc[0, 0] if not oil_df.empty else None
+            col_oil.metric("Crude Oil Avg", f"${oil_avg:,.2f}" if pd.notnull(oil_avg) else "N/A")
 
-        # S&P 500 Avg
-        sp500_avg = pd.read_sql(
-            """SELECT AVG(Close) AS avg_sp500_price FROM stock_data 
-               WHERE source = '^GSPC' AND DATE(Date) BETWEEN %s AND %s""",
-            engine, params=(start_date, end_date)
-        ).iloc[0, 0]
-        col_sp500.metric("S&P 500 Avg", f"${sp500_avg:,.2f}" if pd.notnull(sp500_avg) else "N/A")
+            # S&P 500 Avg
+            sp500_df = safe_read_sql(
+                """SELECT AVG(Close) AS avg_sp500_price FROM stock_data 
+                   WHERE source = '^GSPC' AND DATE(Date) BETWEEN %s AND %s""",
+                engine, params=(start_date, end_date)
+            )
+            sp500_avg = sp500_df.iloc[0, 0] if not sp500_df.empty else None
+            col_sp500.metric("S&P 500 Avg", f"${sp500_avg:,.2f}" if pd.notnull(sp500_avg) else "N/A")
 
-        # NIFTY Avg
-        nifty_avg = pd.read_sql(
-            """SELECT AVG(Close) AS avg_nifty_price FROM stock_data 
-               WHERE source = '^NSEI' AND DATE(Date) BETWEEN %s AND %s""",
-            engine, params=(start_date, end_date)
-        ).iloc[0, 0]
-        col_nifty.metric("NIFTY 50 Avg", f"₹{nifty_avg:,.2f}" if pd.notnull(nifty_avg) else "N/A")
+            # NIFTY Avg
+            nifty_df = safe_read_sql(
+                """SELECT AVG(Close) AS avg_nifty_price FROM stock_data 
+                   WHERE source = '^NSEI' AND DATE(Date) BETWEEN %s AND %s""",
+                engine, params=(start_date, end_date)
+            )
+            nifty_avg = nifty_df.iloc[0, 0] if not nifty_df.empty else None
+            col_nifty.metric("NIFTY 50 Avg", f"₹{nifty_avg:,.2f}" if pd.notnull(nifty_avg) else "N/A")
+        except Exception as e:
+            st.error(f"Error computing averages: {e}")
 
     st.write("---")
     st.subheader("Daily Market Snapshot Table")
-    snapshot_df = pd.read_sql(
-        """
-        SELECT
-            DATE(c.last_updated) AS date,
-            c.current_price AS bitcoin_price,
-            o.Price AS oil_price,
-            sp.Close AS sp500_close,
-            ni.Close AS nifty_close
-        FROM api_data c
-        LEFT JOIN oil_data o
-            ON DATE(c.last_updated) = DATE(o.Date)
-        LEFT JOIN stock_data sp
-            ON DATE(c.last_updated) = DATE(sp.Date) AND sp.source = '^GSPC'
-        LEFT JOIN stock_data ni
-            ON DATE(c.last_updated) = DATE(ni.Date) AND ni.source = '^NSEI'
-        WHERE c.id = 'bitcoin'
-        ORDER BY date DESC
-        LIMIT 100
-        """,
-        engine
-    )
-    st.dataframe(snapshot_df, use_container_width=True)
+    try:
+        snapshot_df = safe_read_sql(
+            """
+            SELECT
+                DATE(c.last_updated) AS date,
+                c.current_price AS bitcoin_price,
+                o.Price AS oil_price,
+                sp.Close AS sp500_close,
+                ni.Close AS nifty_close
+            FROM api_data c
+            LEFT JOIN oil_data o
+                ON DATE(c.last_updated) = DATE(o.Date)
+            LEFT JOIN stock_data sp
+                ON DATE(c.last_updated) = DATE(sp.Date) AND sp.source = '^GSPC'
+            LEFT JOIN stock_data ni
+                ON DATE(c.last_updated) = DATE(ni.Date) AND ni.source = '^NSEI'
+            WHERE c.id = 'bitcoin'
+            ORDER BY date DESC
+            LIMIT 100
+            """,
+            engine
+        )
+        st.dataframe(snapshot_df, use_container_width=True)
+    except Exception as e:
+        st.error(f"Snapshot Query Failed: {e}")
 
 # ==========================================
 # PAGE 2: QUERY ANALYSIS
@@ -183,11 +207,11 @@ elif page == "Query Analysis":
         elif query_option == "Get the most recently updated coin.":
             sql = "select * from api_data order by last_updated desc limit 1"
         elif query_option == "Calculate the average daily price of Ethereum in the past 1 year.":
-            sql = "SELECT DATE(last_updated) AS price_date, AVG(current_price) AS daily_avg_price FROM api_data WHERE symblol = 'eth' AND last_updated >= DATE_SUB(CURDATE(), INTERVAL 1 YEAR) GROUP BY DATE(last_updated) ORDER BY price_date"
+            sql = "SELECT DATE(last_updated) AS price_date, AVG(current_price) AS daily_avg_price FROM api_data WHERE symbol = 'eth' AND last_updated >= DATE_SUB(CURDATE(), INTERVAL 1 YEAR) GROUP BY DATE(last_updated) ORDER BY price_date"
         elif query_option == "Show the daily price trend of Bitcoin in Feb 2026.":
             sql = "select * from api_data where id = 'bitcoin' and year(last_updated) = 2026 and month(last_updated) = 2"    
         elif query_option == "Find the coin with the highest average price over 1 year.":
-            sql = "select symblol, name, avg(current_price) as avg_price_1y from api_data where last_updated >= DATE_SUB(CURDATE(), INTERVAL 1 YEAR) group by symblol, name order by avg_price_1y DESC"
+            sql = "select symbol, name, avg(current_price) as avg_price_1y from api_data where last_updated >= DATE_SUB(CURDATE(), INTERVAL 1 YEAR) group by symbol, name order by avg_price_1y DESC"
         elif query_option == "Get the percentage change in Bitcoin price during Feb 2026":
             sql = "select last_updated, current_price, (current_price - LAG(current_price) OVER (ORDER BY last_updated)) / LAG(current_price) OVER (ORDER BY last_updated) * 100 AS percent_change from api_data where id = 'bitcoin'"
         elif query_option == "Find the highest oil price in the last 5 years.":
@@ -226,14 +250,16 @@ elif page == "Query Analysis":
             sql = "SELECT DATE(c.last_updated) AS date, c.id AS crypto_id, avg(c.current_price) AS crypto_price, s.Close AS nifty_close_price FROM top_3_coin c LEFT JOIN stock_data s ON DATE(c.last_updated) = DATE(s.Date) AND s.source = '^NSEI' GROUP BY DATE(c.last_updated), c.id, s.Close"
 
         try:
-            df = pd.read_sql(sql, engine)
+            df = safe_read_sql(sql, engine)
             st.subheader("Query Result")
             st.dataframe(df, use_container_width=True)
         except Exception as e:
-            st.error(f"SQL Error: {e}")
+            # Displays the real SQL error clearly without bricking the rest of the application
+            st.error("🚨 Database Query Execution Failed!")
+            st.code(textwrap.dedent(str(e)), language="text")
 
 # ==========================================
-# PAGE 3: INSIGHTS (Charts added)
+# PAGE 3: INSIGHTS
 # ==========================================
 elif page == "Insights":
     st.title("Insights on Top 3 Cryptocurrencies")
@@ -251,27 +277,28 @@ elif page == "Insights":
         end_date = st.date_input("End date", key="p3_end", value=pd.to_datetime("today"))
 
     if st.button("View Price Trend"):
-        df = pd.read_sql(
-            """
-            SELECT
-                DATE(last_updated) AS date,
-                current_price
-            FROM api_data
-            WHERE id = %s
-              AND DATE(last_updated) BETWEEN %s AND %s
-            ORDER BY date
-            """,
-            engine,
-            params=(coin, start_date, end_date)
-        )
+        try:
+            df = safe_read_sql(
+                """
+                SELECT
+                    DATE(last_updated) AS date,
+                    current_price
+                FROM api_data
+                WHERE id = %s
+                  AND DATE(last_updated) BETWEEN %s AND %s
+                ORDER BY date
+                """,
+                engine,
+                params=(coin, start_date, end_date)
+            )
 
-        if df.empty:
-            st.warning("No data available for the selected coin and date range.")
-        else:
-            # --- Chart (Newly Added per requirements) ---
-            st.subheader(f"Price Trend Chart: {coin.capitalize()}")
-            st.line_chart(data=df.set_index('date'), y='current_price')
-            
-            # --- Table ---
-            st.subheader("Daily Price Table")
-            st.dataframe(df, use_container_width=True)
+            if df.empty:
+                st.warning("No data available for the selected coin and date range.")
+            else:
+                st.subheader(f"Price Trend Chart: {coin.capitalize()}")
+                st.line_chart(data=df.set_index('date'), y='current_price')
+                
+                st.subheader("Daily Price Table")
+                st.dataframe(df, use_container_width=True)
+        except Exception as e:
+            st.error(f"Failed to fetch insights data: {e}")
