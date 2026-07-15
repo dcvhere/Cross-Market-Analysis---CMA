@@ -2,22 +2,35 @@ import streamlit as st
 import pandas as pd
 from sqlalchemy import create_engine
 
-# 1. SET_PAGE_CONFIG MUST BE THE VERY FIRST STREAMLIT COMMAND
+# ==========================================
+# 1. SET PAGE CONFIG (Must be the very first Streamlit command)
+# ==========================================
 st.set_page_config(page_title="Market Analysis", layout="wide")
+
+# ==========================================
+# 2. CONFIGURATION: EXTRACTED FROM IPYNB
+# ==========================================
+DB_USERNAME = "iatXFmXH7cy5Eyv.root"
+DB_PASSWORD = "ndGScqvE2B1dpP9p"
+DB_NAME     = "market_analysis" 
+
+CRYPTO_TABLE = "api_data"       
+OIL_TABLE    = "oil_data"       
+TOP3_TABLE   = "top3_crypto"     
+STOCK_TABLE  = "nifty_data"      
+# ==========================================
 
 st.title("Cross-Market Analysis: Crypto, Oil & Stocks with SQL")
 st.subheader("Cross-Market Analysis Dashboard")
 st.write("Data Preview")
 
-# 2. DATABASE CONNECTION
-# TODO: Retrieve your exact TiDB connection string from your Jupyter Notebook.
-# Update the placeholder below with your actual username, password, and database_name.
+# Database connection using extracted TiDB details
 engine = create_engine(
-    "mysql+pymysql://<username>:<password>@gateway01.ap-southeast-1.prod.aws.tidbcloud.com:4000/<database_name>",
+    f"mysql+pymysql://{DB_USERNAME}:{DB_PASSWORD}@gateway01.ap-southeast-1.prod.aws.tidbcloud.com:4000/{DB_NAME}",
     connect_args={"ssl": {"ssl": True}}
 )
 
-# 3. NAVIGATION
+# Navigation
 page = st.sidebar.radio(
     "Navigation",
     [
@@ -35,13 +48,12 @@ if page == "Data Exploration":
     end_date = st.date_input("End date")
 
     if st.button("Bitcoin Average Price Analysis"):
-        # Parameterized queries prevent SQL injection and format errors
         btc_avg = pd.read_sql(
-            """
-            SELECT AVG(price_usd) AS avg_bitcoin
-            FROM crypto_prices
-            WHERE coin_id = 'bitcoin'
-              AND date BETWEEN %s AND %s
+            f"""
+            SELECT AVG(current_price) AS avg_bitcoin
+            FROM {CRYPTO_TABLE}
+            WHERE id = 'bitcoin'
+              AND DATE(last_updated) BETWEEN %s AND %s
             """,
             engine,
             params=(start_date, end_date)
@@ -50,10 +62,10 @@ if page == "Data Exploration":
 
     if st.button("Oil Average Price Analysis"):
         oil_avg = pd.read_sql(
-            """
-            SELECT AVG(price_usd) AS avg_oil_price 
-            FROM oil_prices 
-            WHERE date BETWEEN %s AND %s
+            f"""
+            SELECT AVG(price) AS avg_oil_price 
+            FROM {OIL_TABLE} 
+            WHERE DATE(date) BETWEEN %s AND %s
             """,
             engine,
             params=(start_date, end_date)
@@ -65,18 +77,17 @@ elif page == "Query Analysis":
     st.write("Cross-Market comparisons")
     
     if st.button("Crypto Price trend vs Nifty (^NSEI)"):
-        # Using LEFT JOIN on the proper tables defined in your schema
-        sql = """
+        # Utilizing the exact table names derived from notebook's to_sql operations
+        sql = f"""
         SELECT
-            c.date,
-            c.coin_id AS crypto_id,
-            AVG(c.price_usd) AS crypto_price,
+            DATE(c.last_updated) AS date,
+            c.id AS crypto_id,
+            avg(c.current_price) AS crypto_price,
             s.close AS nifty_close_price
-        FROM crypto_prices c
-        LEFT JOIN stock_prices s 
-            ON c.date = s.date AND s.ticker = '^NSEI'
-        WHERE c.coin_id IN ('bitcoin', 'ethereum', 'tether')
-        GROUP BY c.date, c.coin_id, s.close
+        FROM {TOP3_TABLE} c
+        LEFT JOIN {STOCK_TABLE} s 
+            ON DATE(c.last_updated) = s.Date AND s.source = '^NSEI'
+        GROUP BY DATE(c.last_updated), c.id, s.close
         """
         df = pd.read_sql(sql, engine)
 
@@ -97,13 +108,13 @@ elif page == "Insights":
 
     if st.button("View Price Trend"):
         df = pd.read_sql(
-            """
+            f"""
             SELECT
-                date,
-                price_usd AS current_price
-            FROM crypto_prices
-            WHERE coin_id = %s
-              AND date BETWEEN %s AND %s
+                DATE(last_updated) AS date,
+                current_price
+            FROM {CRYPTO_TABLE}
+            WHERE id = %s
+              AND DATE(last_updated) BETWEEN %s AND %s
             ORDER BY date
             """,
             engine,
