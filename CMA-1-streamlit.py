@@ -5,15 +5,15 @@ from sqlalchemy import create_engine
 # 1. SET_PAGE_CONFIG MUST BE THE VERY FIRST STREAMLIT COMMAND
 st.set_page_config(page_title="Market Analysis", layout="wide")
 
-# Now you can use other Streamlit commands
 st.title("Cross-Market Analysis: Crypto, Oil & Stocks with SQL")
 st.subheader("Cross-Market Analysis Dashboard")
 st.write("Data Preview")
 
 # 2. DATABASE CONNECTION
-# TODO: Replace 'db_username', 'db_password', and 'literacy_gdp_analysis' with your actual TiDB credentials and database name.
+# TODO: Retrieve your exact TiDB connection string from your Jupyter Notebook.
+# Update the placeholder below with your actual username, password, and database_name.
 engine = create_engine(
-    "mysql+pymysql://db_username:db_password@gateway01.ap-southeast-1.prod.aws.tidbcloud.com:4000/literacy_gdp_analysis",
+    "mysql+pymysql://<username>:<password>@gateway01.ap-southeast-1.prod.aws.tidbcloud.com:4000/<database_name>",
     connect_args={"ssl": {"ssl": True}}
 )
 
@@ -35,13 +35,13 @@ if page == "Data Exploration":
     end_date = st.date_input("End date")
 
     if st.button("Bitcoin Average Price Analysis"):
-        # We use standard parameterized queries here to prevent SQL injection
+        # Parameterized queries prevent SQL injection and format errors
         btc_avg = pd.read_sql(
             """
-            SELECT AVG(current_price) AS avg_bitcoin
-            FROM api_data
-            WHERE id = 'bitcoin'
-              AND DATE(last_updated) BETWEEN %s AND %s
+            SELECT AVG(price_usd) AS avg_bitcoin
+            FROM crypto_prices
+            WHERE coin_id = 'bitcoin'
+              AND date BETWEEN %s AND %s
             """,
             engine,
             params=(start_date, end_date)
@@ -51,9 +51,9 @@ if page == "Data Exploration":
     if st.button("Oil Average Price Analysis"):
         oil_avg = pd.read_sql(
             """
-            SELECT AVG(price) AS avg_oil_price 
-            FROM oil_data 
-            WHERE DATE(date) BETWEEN %s AND %s
+            SELECT AVG(price_usd) AS avg_oil_price 
+            FROM oil_prices 
+            WHERE date BETWEEN %s AND %s
             """,
             engine,
             params=(start_date, end_date)
@@ -65,16 +65,18 @@ elif page == "Query Analysis":
     st.write("Cross-Market comparisons")
     
     if st.button("Crypto Price trend vs Nifty (^NSEI)"):
+        # Using LEFT JOIN on the proper tables defined in your schema
         sql = """
         SELECT
-            DATE(c.last_updated) AS date,
-            c.id AS crypto_id,
-            avg(c.current_price) AS crypto_price,
+            c.date,
+            c.coin_id AS crypto_id,
+            AVG(c.price_usd) AS crypto_price,
             s.close AS nifty_close_price
-        FROM top_3_coin c
-        LEFT JOIN stock_data s 
-            ON DATE(c.last_updated) = s.Date AND s.source = '^NSEI'
-        GROUP BY DATE(c.last_updated), c.id, s.close
+        FROM crypto_prices c
+        LEFT JOIN stock_prices s 
+            ON c.date = s.date AND s.ticker = '^NSEI'
+        WHERE c.coin_id IN ('bitcoin', 'ethereum', 'tether')
+        GROUP BY c.date, c.coin_id, s.close
         """
         df = pd.read_sql(sql, engine)
 
@@ -97,11 +99,11 @@ elif page == "Insights":
         df = pd.read_sql(
             """
             SELECT
-                DATE(last_updated) AS date,
-                current_price
-            FROM api_data
-            WHERE id = %s
-              AND DATE(last_updated) BETWEEN %s AND %s
+                date,
+                price_usd AS current_price
+            FROM crypto_prices
+            WHERE coin_id = %s
+              AND date BETWEEN %s AND %s
             ORDER BY date
             """,
             engine,
