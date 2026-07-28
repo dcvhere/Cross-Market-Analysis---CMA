@@ -31,6 +31,7 @@ def run_query(query, params=None):
     """Executes a SQL query and returns a pandas DataFrame."""
     try:
         with engine.connect() as conn:
+            # Use .execute() with text and params then convert to DF for safer parameter handling
             return pd.read_sql(text(query), conn, params=params)
     except Exception as e:
         st.error(f"Database Query Error: {e}")
@@ -121,7 +122,6 @@ def render_oil():
             st.line_chart(df.set_index('date'))
 
     else:
-        # FIXED: Changed alias from 'Range' to 'Price_Range' to avoid SQL syntax error
         df = run_query("SELECT YEAR(date) as Year, (MAX(price) - MIN(price)) as Price_Range FROM oil_processed_prices GROUP BY Year")
         if not df.empty:
             st.markdown("#### Annual Price Volatility (Max - Min)")
@@ -176,7 +176,9 @@ def render_correlation():
 
     if "Date Filter" in sub:
         d = st.date_input("🗓️ Select Comparison Date", value=date(2025, 12, 1))
-        df = run_query("SELECT c.date, c.price_inr as BTC_Price, o.price as Oil_Price FROM crypto_historical_prices c JOIN oil_processed_prices o ON c.date = o.date WHERE c.coin_id='bitcoin' AND c.date = %s", params=(d,))
+        # FIXED: Pass parameters as a dictionary to pd.read_sql
+        query = "SELECT c.date, c.price_inr as BTC_Price, o.price as Oil_Price FROM crypto_historical_prices c JOIN oil_processed_prices o ON c.date = o.date WHERE c.coin_id='bitcoin' AND c.date = :selected_date"
+        df = run_query(query, params={"selected_date": d})
         if not df.empty:
             st.plotly_chart(px.bar(df.melt(id_vars='date'), x='variable', y='value', color='variable', title=f"BTC vs Oil Prices on {d}"), use_container_width=True)
         else:
