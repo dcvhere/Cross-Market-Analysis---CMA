@@ -3,137 +3,125 @@ import streamlit as st
 from streamlit_option_menu import option_menu
 import pandas as pd
 from sqlalchemy import create_engine, text
-import pymysql # Required by sqlalchemy for mysql+pymysql
 
-# Database connection details (re-using from the main notebook)
+# Database connection details
 DB_HOST = "gateway01.ap-southeast-1.prod.aws.tidbcloud.com"
 DB_USER = "iatXFmXH7cy5Eyv.root"
 DB_PASSWORD = "ndGScqvE2B1dpP9p"
 DB_PORT = 4000
-DB_NAME = "market_data_db" # Centralized database name
+DB_NAME = "market_data_db"
 
-# Create a SQLAlchemy engine for persistent connections to the specific database
 DATABASE_URL = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 engine = create_engine(DATABASE_URL, connect_args={"ssl": {"ssl": True}})
 
-st.set_page_config(layout="wide")
-st.title("Cross-Market Analysis: Crypto, Oil & Stocks")
-st.subheader("Interactive Dashboard")
+st.set_page_config(layout="wide", page_title="Market Analysis Pro")
+st.title("Comprehensive Cross-Market Analysis")
 
 with st.sidebar:
     selected = option_menu(
-        "Main Menu",
-        ["Home", "Cryptocurrency", "Oil Prices", "Stock Market"],
-        icons=["house", "currency-bitcoin", "graph-up-arrow", "building-columns"],
+        "Analysis Modules",
+        ["Home", "Cryptocurrency Analysis", "Oil Price Analysis", "Stock Market Analysis", "Cross-Market Correlation"],
+        icons=["house", "currency-bitcoin", "droplet", "graph-up", "intersect"],
         default_index=0
     )
 
+def run_query(query):
+    with engine.connect() as conn:
+        return pd.read_sql(text(query), conn)
+
 if selected == "Home":
-    st.write("Welcome to the Cross-Market Analysis Dashboard!")
-    st.write("Use the sidebar to navigate through different market data.")
-    st.image("https://www.tidb.cloud/blog/tidb-vs-mysql-database/images/MySQL%20to%20TiDB.png", use_column_width=True)
+    st.markdown("### Market Overview Suite")
+    st.write("Comprehensive analysis of Cryptocurrency, Oil, and Global Stock Indices.")
 
-elif selected == "Cryptocurrency":
-    st.header("Cryptocurrency Data")
-    crypto_option = st.selectbox(
-        "Select data view:",
-        (
-            "Current Market Data",
-            "Top 5 by Market Cap",
-            "Circulating Supply Ratio (>90%)"
-        )
-    )
+elif selected == "Cryptocurrency Analysis":
+    st.header("Crypto Deep Dive")
+    q_type = st.selectbox("Select Query:", [
+        "Coins within 10% of ATH",
+        "Avg Market Cap Rank (Volume > $1B)",
+        "Most Recently Updated Coin",
+        "Bitcoin Peak Price (Last 365 Days)",
+        "Ethereum Avg Price (Past 1 Year)",
+        "Bitcoin Daily Trend (Feb 2026)",
+        "Highest Avg Price Coin (1 Year)",
+        "Bitcoin % Change (Feb 2026)"
+    ])
 
-    if crypto_option == "Current Market Data":
-        st.subheader("All Current Cryptocurrency Market Data")
-        try:
-            df_crypto_current = pd.read_sql(text("SELECT * FROM crypto_current_market LIMIT 100"), engine)
-            st.dataframe(df_crypto_current)
-        except Exception as e:
-            st.error(f"Error loading current crypto data: {e}")
+    if q_type == "Coins within 10% of ATH":
+        df = run_query("SELECT name, symbol, current_price, ath FROM crypto_current_market WHERE (current_price / ath) >= 0.9")
+        st.dataframe(df)
+    elif q_type == "Avg Market Cap Rank (Volume > $1B)":
+        df = run_query("SELECT AVG(market_cap_rank) as avg_rank FROM crypto_current_market WHERE total_volume > 1000000000")
+        st.metric("Average Rank", f"{df.iloc[0,0]:.2f}")
+    elif q_type == "Most Recently Updated Coin":
+        df = run_query("SELECT name, last_updated FROM crypto_current_market ORDER BY last_updated DESC LIMIT 1")
+        st.write(df)
+    elif q_type == "Bitcoin Peak Price (Last 365 Days)":
+        df = run_query("SELECT MAX(price_inr) as peak FROM crypto_historical_prices WHERE coin_id = 'bitcoin'")
+        st.metric("Peak Price (INR)", f"{df.iloc[0,0]:,.2f}")
+    elif q_type == "Bitcoin Daily Trend (Feb 2026)":
+        df = run_query("SELECT date, price_inr FROM crypto_historical_prices WHERE coin_id = 'bitcoin' AND date LIKE '2026-02%'")
+        st.line_chart(df.set_index('date'))
+    elif q_type == "Bitcoin % Change (Feb 2026)":
+        df = run_query("SELECT date, price_inr, (price_inr - LAG(price_inr) OVER (ORDER BY date)) / LAG(price_inr) OVER (ORDER BY date) * 100 as pct_change FROM crypto_historical_prices WHERE coin_id = 'bitcoin' AND date LIKE '2026-02%'")
+        st.dataframe(df)
 
-    elif crypto_option == "Top 5 by Market Cap":
-        st.subheader("Top 5 Cryptocurrencies by Market Cap")
-        try:
-            df_top_5_crypto = pd.read_sql(text("SELECT name, symbol, current_price, market_cap FROM crypto_processed_current ORDER BY market_cap DESC LIMIT 5"), engine)
-            st.dataframe(df_top_5_crypto)
-        except Exception as e:
-            st.error(f"Error loading top 5 crypto by market cap: {e}")
+elif selected == "Oil Price Analysis":
+    st.header("Crude Oil Analysis")
+    oil_q = st.selectbox("Select Analysis:", [
+        "COVID Crash Prices (March-April 2020)",
+        "Lowest Price (Last 5 Years)",
+        "Volatility (Max-Min Difference per Year)"
+    ])
+    
+    if oil_q == "COVID Crash Prices (March-April 2020)":
+        df = run_query("SELECT date, price FROM oil_prices WHERE date BETWEEN '2020-03-01' AND '2020-04-30'")
+        st.line_chart(df.set_index('date'))
+    elif oil_q == "Lowest Price (Last 5 Years)":
+        df = run_query("SELECT MIN(price) as min_price FROM oil_prices WHERE date >= DATE_SUB(CURDATE(), INTERVAL 5 YEAR)")
+        st.metric("Lowest Oil Price", f"${df.iloc[0,0]:.2f}")
+    elif oil_q == "Volatility (Max-Min Difference per Year)":
+        df = run_query("SELECT YEAR(date) as year, (MAX(price) - MIN(price)) as volatility FROM oil_prices GROUP BY year")
+        st.bar_chart(df.set_index('year'))
 
-    elif crypto_option == "Circulating Supply Ratio (>90%)":
-        st.subheader("Cryptocurrencies with >90% Circulating Supply Ratio")
-        try:
-            df_high_supply_ratio = pd.read_sql(text("SELECT name, symbol, circulating_supply, total_supply FROM crypto_processed_current WHERE (circulating_supply * 100 / total_supply) > 90 LIMIT 10"), engine)
-            st.dataframe(df_high_supply_ratio)
-        except Exception as e:
-            st.error(f"Error loading high circulating supply crypto: {e}")
+elif selected == "Stock Market Analysis":
+    st.header("Global Equity Indices")
+    stock_q = st.selectbox("Select Analysis:", [
+        "Monthly Avg Closing Price per Ticker",
+        "Avg Trading Volume NSEI (2024)"
+    ])
+    
+    if stock_q == "Monthly Avg Closing Price per Ticker":
+        df = run_query("SELECT source, DATE_FORMAT(date, '%Y-%m') as month, AVG(close_price) as avg_close FROM stock_prices GROUP BY source, month")
+        st.dataframe(df)
+    elif stock_q == "Avg Trading Volume NSEI (2024)":
+        df = run_query("SELECT AVG(volume) FROM stock_prices WHERE source = '^NSEI' AND YEAR(date) = 2024")
+        st.write(df)
 
-elif selected == "Oil Prices":
-    st.header("Crude Oil Prices (WTI)")
-    oil_option = st.selectbox(
-        "Select data view:",
-        (
-            "Raw Oil Prices",
-            "Highest Price in Last 5 Years",
-            "Average Annual Price"
-        )
-    )
+elif selected == "Cross-Market Correlation":
+    st.header("Cross-Asset Correlations")
+    cross_q = st.selectbox("Select Comparison:", [
+        "Bitcoin vs Oil Avg (2025)",
+        "Bitcoin vs ^GSPC Correlation",
+        "Ethereum vs NASDAQ (^IXIC) 2025",
+        "Top 3 Crypto vs Nifty (^NSEI)",
+        "Multi-Asset Daily Comparison (Stocks, Oil, Bitcoin)"
+    ])
 
-    if oil_option == "Raw Oil Prices":
-        st.subheader("Recent Raw Oil Prices")
-        try:
-            df_oil_raw = pd.read_sql(text("SELECT date, price FROM oil_prices ORDER BY date DESC LIMIT 100"), engine)
-            st.dataframe(df_oil_raw)
-        except Exception as e:
-            st.error(f"Error loading raw oil prices: {e}")
-
-    elif oil_option == "Highest Price in Last 5 Years":
-        st.subheader("Highest Oil Price in the Last 5 Years")
-        try:
-            df_highest_oil = pd.read_sql(text("SELECT MAX(price) AS highest_oil_price_5y FROM oil_processed_prices WHERE date >= DATE_SUB(CURDATE(), INTERVAL 5 YEAR)"), engine)
-            st.dataframe(df_highest_oil)
-        except Exception as e:
-            st.error(f"Error loading highest oil price: {e}")
-
-    elif oil_option == "Average Annual Price":
-        st.subheader("Average Annual Oil Price (Last 5 Years)")
-        try:
-            df_avg_annual_oil = pd.read_sql(text("SELECT YEAR(date) AS year, AVG(price) AS average_price FROM oil_processed_prices GROUP BY year ORDER BY year DESC LIMIT 5"), engine)
-            st.dataframe(df_avg_annual_oil)
-        except Exception as e:
-            st.error(f"Error loading average annual oil price: {e}")
-
-elif selected == "Stock Market":
-    st.header("Stock Market Data")
-    stock_option = st.selectbox(
-        "Select data view:",
-        (
-            "Recent Stock Prices",
-            "Highest NASDAQ Close",
-            "Top 5 S&P 500 Price Differences"
-        )
-    )
-
-    if stock_option == "Recent Stock Prices":
-        st.subheader("Recent Stock Prices")
-        try:
-            df_stocks_raw = pd.read_sql(text("SELECT date, source, close_price FROM stock_prices ORDER BY date DESC LIMIT 100"), engine)
-            st.dataframe(df_stocks_raw)
-        except Exception as e:
-            st.error(f"Error loading raw stock prices: {e}")
-
-    elif stock_option == "Highest NASDAQ Close":
-        st.subheader("Highest Closing Price for NASDAQ")
-        try:
-            df_highest_nasdaq = pd.read_sql(text("SELECT MAX(close_price) AS highest_close_price_NASDAQ FROM stock_processed_data WHERE source = '^IXIC'"), engine)
-            st.dataframe(df_highest_nasdaq)
-        except Exception as e:
-            st.error(f"Error loading highest NASDAQ close: {e}")
-
-    elif stock_option == "Top 5 S&P 500 Price Differences":
-        st.subheader("Top 5 Days with Highest Price Difference for S&P 500")
-        try:
-            df_sp500_diff = pd.read_sql(text("SELECT date, (high_price - low_price) AS price_difference FROM stock_processed_data WHERE source = '^GSPC' ORDER BY price_difference DESC LIMIT 5"), engine)
-            st.dataframe(df_sp500_diff)
-        except Exception as e:
-            st.error(f"Error loading S&P 500 price differences: {e}")
+    if cross_q == "Bitcoin vs Oil Avg (2025)":
+        df = run_query("""
+            SELECT 'Bitcoin' as Asset, AVG(price_inr) as avg_val FROM crypto_historical_prices WHERE coin_id='bitcoin' AND YEAR(date)=2025
+            UNION
+            SELECT 'Oil' as Asset, AVG(price) as avg_val FROM oil_prices WHERE YEAR(date)=2025
+        """)
+        st.dataframe(df)
+    elif cross_q == "Multi-Asset Daily Comparison (Stocks, Oil, Bitcoin)":
+        df = run_query("""
+            SELECT s.date, s.close_price as SP500, o.price as Oil, c.price_inr as Bitcoin
+            FROM stock_prices s
+            JOIN oil_prices o ON s.date = o.date
+            JOIN crypto_historical_prices c ON s.date = c.date
+            WHERE s.source = '^GSPC' AND c.coin_id = 'bitcoin'
+            ORDER BY s.date DESC LIMIT 100
+        """)
+        st.dataframe(df)
+"
