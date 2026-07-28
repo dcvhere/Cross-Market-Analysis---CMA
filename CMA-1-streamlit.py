@@ -38,11 +38,8 @@ elif selected == "Cryptocurrency Analysis":
     q_type = st.selectbox("Select Query:", [
         "Coins within 10% of ATH",
         "Avg Market Cap Rank (Volume > $1B)",
-        "Most Recently Updated Coin",
         "Bitcoin Peak Price (Last 365 Days)",
-        "Ethereum Avg Price (Past 1 Year)",
         "Bitcoin Daily Trend (Feb 2026)",
-        "Highest Avg Price Coin (1 Year)",
         "Bitcoin % Change (Feb 2026)"
     ])
 
@@ -52,9 +49,6 @@ elif selected == "Cryptocurrency Analysis":
     elif q_type == "Avg Market Cap Rank (Volume > $1B)":
         df = run_query("SELECT AVG(market_cap_rank) as avg_rank FROM crypto_current_market WHERE total_volume > 1000000000")
         st.metric("Average Rank", f"{df.iloc[0,0]:.2f}")
-    elif q_type == "Most Recently Updated Coin":
-        df = run_query("SELECT name, last_updated FROM crypto_current_market ORDER BY last_updated DESC LIMIT 1")
-        st.write(df)
     elif q_type == "Bitcoin Peak Price (Last 365 Days)":
         df = run_query("SELECT MAX(price_inr) as peak FROM crypto_historical_prices WHERE coin_id = 'bitcoin'")
         st.metric("Peak Price (INR)", f"{df.iloc[0,0]:,.2f}")
@@ -72,15 +66,15 @@ elif selected == "Oil Price Analysis":
         "Lowest Price (Last 5 Years)",
         "Volatility (Max-Min Difference per Year)"
     ])
-    
+
     if oil_q == "COVID Crash Prices (March-April 2020)":
-        df = run_query("SELECT date, price FROM oil_prices WHERE date BETWEEN '2020-03-01' AND '2020-04-30'")
+        df = run_query("SELECT date, price FROM oil_processed_prices WHERE date BETWEEN '2020-03-01' AND '2020-04-30'")
         st.line_chart(df.set_index('date'))
     elif oil_q == "Lowest Price (Last 5 Years)":
-        df = run_query("SELECT MIN(price) as min_price FROM oil_prices WHERE date >= DATE_SUB(CURDATE(), INTERVAL 5 YEAR)")
+        df = run_query("SELECT MIN(price) as min_price FROM oil_processed_prices WHERE date >= DATE_SUB(CURDATE(), INTERVAL 5 YEAR)")
         st.metric("Lowest Oil Price", f"${df.iloc[0,0]:.2f}")
     elif oil_q == "Volatility (Max-Min Difference per Year)":
-        df = run_query("SELECT YEAR(date) as year, (MAX(price) - MIN(price)) as volatility FROM oil_prices GROUP BY year")
+        df = run_query("SELECT YEAR(date) as year, (MAX(price) - MIN(price)) as volatility FROM oil_processed_prices GROUP BY year")
         st.bar_chart(df.set_index('year'))
 
 elif selected == "Stock Market Analysis":
@@ -89,21 +83,18 @@ elif selected == "Stock Market Analysis":
         "Monthly Avg Closing Price per Ticker",
         "Avg Trading Volume NSEI (2024)"
     ])
-    
+
     if stock_q == "Monthly Avg Closing Price per Ticker":
-        df = run_query("SELECT source, DATE_FORMAT(date, '%Y-%m') as month, AVG(close_price) as avg_close FROM stock_prices GROUP BY source, month")
+        df = run_query("SELECT source, DATE_FORMAT(date, '%Y-%m') as month, AVG(close_price) as avg_close FROM stock_processed_data GROUP BY source, month")
         st.dataframe(df)
     elif stock_q == "Avg Trading Volume NSEI (2024)":
-        df = run_query("SELECT AVG(volume) FROM stock_prices WHERE source = '^NSEI' AND YEAR(date) = 2024")
+        df = run_query("SELECT AVG(volume) FROM stock_processed_data WHERE source = '^NSEI' AND YEAR(date) = 2024")
         st.write(df)
 
 elif selected == "Cross-Market Correlation":
     st.header("Cross-Asset Correlations")
     cross_q = st.selectbox("Select Comparison:", [
         "Bitcoin vs Oil Avg (2025)",
-        "Bitcoin vs ^GSPC Correlation",
-        "Ethereum vs NASDAQ (^IXIC) 2025",
-        "Top 3 Crypto vs Nifty (^NSEI)",
         "Multi-Asset Daily Comparison (Stocks, Oil, Bitcoin)"
     ])
 
@@ -111,17 +102,21 @@ elif selected == "Cross-Market Correlation":
         df = run_query("""
             SELECT 'Bitcoin' as Asset, AVG(price_inr) as avg_val FROM crypto_historical_prices WHERE coin_id='bitcoin' AND YEAR(date)=2025
             UNION
-            SELECT 'Oil' as Asset, AVG(price) as avg_val FROM oil_prices WHERE YEAR(date)=2025
+            SELECT 'Oil' as Asset, AVG(price) as avg_val FROM oil_processed_prices WHERE YEAR(date)=2025
         """)
         st.dataframe(df)
     elif cross_q == "Multi-Asset Daily Comparison (Stocks, Oil, Bitcoin)":
         df = run_query("""
-            SELECT s.date, s.close_price as SP500, o.price as Oil, c.price_inr as Bitcoin
-            FROM stock_prices s
-            JOIN oil_prices o ON s.date = o.date
-            JOIN crypto_historical_prices c ON s.date = c.date
+            SELECT 
+                CAST(s.date AS DATE) as Trade_Date, 
+                s.close_price as SP500_Close, 
+                o.price as Oil_Price, 
+                c.price_inr as BTC_Price_INR
+            FROM stock_processed_data s
+            JOIN oil_processed_prices o ON CAST(s.date AS DATE) = CAST(o.date AS DATE)
+            JOIN crypto_historical_prices c ON CAST(s.date AS DATE) = CAST(c.date AS DATE)
             WHERE s.source = '^GSPC' AND c.coin_id = 'bitcoin'
-            ORDER BY s.date DESC LIMIT 100
+            ORDER BY Trade_Date DESC 
+            LIMIT 100
         """)
         st.dataframe(df)
-"
