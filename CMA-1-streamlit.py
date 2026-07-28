@@ -71,14 +71,17 @@ def render_crypto():
             st.plotly_chart(px.bar(df, x='name', y='market_cap', title="Market Cap of Top 5 Coins", color='name'), use_container_width=True)
             
     elif "Circulating" in choice:
-        df = run_query("SELECT name, symbol, (circulating_supply / total_supply) as supply_ratio FROM crypto_processed_current WHERE total_supply > 0 AND (circulating_supply / total_supply) > 0.9")
+        # Limited to top 15 by market cap to avoid a clumsy chart
+        df = run_query("SELECT name, symbol, (circulating_supply / total_supply) as supply_ratio FROM crypto_processed_current WHERE total_supply > 0 AND (circulating_supply / total_supply) > 0.9 ORDER BY market_cap DESC LIMIT 15")
         if not df.empty:
-            st.plotly_chart(px.pie(df, names='name', values='supply_ratio', title="Coins with >90% Supply Ratio"), use_container_width=True)
+            # Changed to a bar chart for better visualization of independent ratios
+            st.plotly_chart(px.bar(df, x='name', y='supply_ratio', title="Top 15 Coins with >90% Supply Ratio", color='name'), use_container_width=True)
             
     elif "10%" in choice:
-        df = run_query("SELECT name, symbol, current_price, ath FROM crypto_current_market WHERE ath > 0 AND (current_price / ath) >= 0.9")
+        # Limited to top 15 by market cap rank, and plotting exact 'name' instead of 'symbol'
+        df = run_query("SELECT name, symbol, current_price, ath FROM crypto_current_market WHERE ath > 0 AND (current_price / ath) >= 0.9 ORDER BY market_cap_rank ASC LIMIT 15")
         if not df.empty:
-            st.plotly_chart(px.bar(df, x='symbol', y=['current_price', 'ath'], barmode='group', title="Current Price vs All-Time High"), use_container_width=True)
+            st.plotly_chart(px.bar(df, x='name', y=['current_price', 'ath'], barmode='group', title="Top 15 Coins within 10% of All-Time High"), use_container_width=True)
             
     elif "$1B" in choice:
         df = run_query("SELECT name, market_cap_rank, total_volume FROM crypto_current_market WHERE total_volume > 1000000000 ORDER BY market_cap_rank")
